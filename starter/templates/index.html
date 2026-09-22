@@ -1,18 +1,54 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Sudoku Game</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sudoku</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 </head>
 <body>
-  <h1>Sudoku Game</h1>
-  <div id="sudoku-board"></div>
-  <div class="controls">
-    <button id="new-game">New Game</button>
-    <button id="check-solution">Check Solution</button>
-    <span id="message"></span>
-  </div>
-  <script src="/static/main.js"></script>
+  <header class="app-header">
+    <h1>Sudoku</h1>
+    <button id="theme-toggle" type="button">Dark Mode</button>
+  </header>
+
+  <main>
+    <section class="controls">
+      <label>
+        Difficulty:
+        <select id="difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </label>
+      <button id="new-game" type="button">New Game</button>
+      <button id="check" type="button">Check</button>
+      <button id="hint" type="button">Hint</button>
+    </section>
+
+    <p id="timer">Time: 0:00</p>
+    <p id="message" role="status" aria-live="polite"></p>
+
+    <div id="board" class="board" aria-label="Sudoku board"></div>
+
+    <section class="leaderboard">
+      <h2>Top 10 Fastest Times</h2>
+      <table id="leaderboard">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Name</th>
+            <th>Time</th>
+            <th>Level</th>
+            <th>Hints</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

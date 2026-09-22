@@ -1,105 +1,219 @@
-// Client-side rendering and interaction for the Flask-backed Sudoku
-const SIZE = 9;
-let puzzle = [];
+const API_URL = "/api/new";
+const STORAGE_KEY = "sudoku-top10";
+const THEME_KEY = "sudoku-dark";
 
-function createBoardElement() {
-  const boardDiv = document.getElementById('sudoku-board');
-  boardDiv.innerHTML = '';
-  for (let i = 0; i < SIZE; i++) {
-    const rowDiv = document.createElement('div');
-    rowDiv.className = 'sudoku-row';
-    for (let j = 0; j < SIZE; j++) {
-      const input = document.createElement('input');
-      input.type = 'text';
+const state = {
+  puzzle: [],
+  solution: [],
+  difficulty: "medium",
+  startTime: null,
+  timerId: null,
+  hints: 0,
+  solved: false,
+};
+
+const boardEl = document.getElementById("board");
+const timerEl = document.getElementById("timer");
+const messageEl = document.getElementById("message");
+const difficultyEl = document.getElementById("difficulty");
+const themeToggle = document.getElementById("theme-toggle");
+
+function getCell(row, col) {
+  return boardEl.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+}
+
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function updateTimer() {
+  if (state.solved || !state.startTime) return;
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  timerEl.textContent = `Time: ${formatTime(elapsed)}`;
+}
+
+function renderBoard() {
+  boardEl.innerHTML = "";
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.inputMode = "numeric";
       input.maxLength = 1;
-      input.className = 'sudoku-cell';
-      input.dataset.row = i;
-      input.dataset.col = j;
-      input.addEventListener('input', (e) => {
-        const val = e.target.value.replace(/[^1-9]/g, '');
-        e.target.value = val;
-      });
-      rowDiv.appendChild(input);
+      input.dataset.row = r;
+      input.dataset.col = c;
+      input.classList.add("cell");
+      input.setAttribute("aria-label", `Row ${r + 1} column ${c + 1}`);
+
+      if ((Math.floor(r / 3) + Math.floor(c / 3)) % 2 === 1) {
+        input.classList.add("box-alt");
+      }
+
+      if (state.puzzle[r][c] !== 0) {
+        input.value = state.puzzle[r][c];
+        input.readOnly = true;
+        input.classList.add("prefilled");
+      } else {
+        input.addEventListener("input", handleInput);
+      }
+
+      boardEl.appendChild(input);
     }
-    boardDiv.appendChild(rowDiv);
   }
 }
 
-function renderPuzzle(puz) {
-  puzzle = puz;
-  createBoardElement();
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  for (let i = 0; i < SIZE; i++) {
-    for (let j = 0; j < SIZE; j++) {
-      const idx = i * SIZE + j;
-      const val = puzzle[i][j];
-      const inp = inputs[idx];
-      if (val !== 0) {
-        inp.value = val;
-        inp.disabled = true;
-        inp.className += ' prefilled';
-      } else {
-        inp.value = '';
-        inp.disabled = false;
+function hasConflict(row, col, value) {
+  for (let i = 0; i < 9; i++) {
+    if (i !== col && getCell(row, i).value === value) return true;
+    if (i !== row && getCell(i, col).value === value) return true;
+  }
+  const boxRow = Math.floor(row / 3) * 3;
+  const boxCol = Math.floor(col / 3) * 3;
+  for (let r = boxRow; r < boxRow + 3; r++) {
+    for (let c = boxCol; c < boxCol + 3; c++) {
+      if ((r !== row || c !== col) && getCell(r, c).value === value) return true;
+    }
+  }
+  return false;
+}
+
+function validateConflicts() {
+  boardEl.querySelectorAll(".cell").forEach((cell) => cell.classList.remove("conflict"));
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const input = getCell(r, c);
+      const value = input.value;
+      if (value && hasConflict(r, c, value)) input.classList.add("conflict");
+    }
+  }
+}
+
+function checkCompletion() {
+  if (state.solved) return;
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (getCell(r, c).value !== String(state.solution[r][c])) return;
+    }
+  }
+  state.solved = true;
+  clearInterval(state.timerId);
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  messageEl.textContent = `Congratulations! You solved it in ${formatTime(elapsed)}.`;
+
+  const name = prompt("You made the Top 10! Enter your name:", "Player");
+  if (name) {
+    saveScore(name, elapsed, state.difficulty, state.hints);
+    renderLeaderboard();
+  }
+}
+
+function handleInput(event) {
+  const input = event.target;
+  input.value = input.value.replace(/[^1-9]/g, "");
+  input.classList.remove("incorrect");
+  validateConflicts();
+  checkCompletion();
+}
+
+function checkPuzzle() {
+  boardEl.querySelectorAll(".incorrect").forEach((cell) => cell.classList.remove("incorrect"));
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const input = getCell(r, c);
+      if (input.readOnly) continue;
+      const value = Number(input.value);
+      if (value && value !== state.solution[r][c]) input.classList.add("incorrect");
+    }
+  }
+}
+
+function hint() {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const input = getCell(r, c);
+      if (!input.readOnly && !input.value) {
+        input.value = state.solution[r][c];
+        input.readOnly = true;
+        input.classList.add("hint");
+        state.hints += 1;
+        checkCompletion();
+        return;
       }
     }
   }
 }
 
-async function newGame() {
-  const res = await fetch('/new');
-  const data = await res.json();
-  renderPuzzle(data.puzzle);
-  document.getElementById('message').innerText = '';
+function loadScores() {
+  return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 }
 
-async function checkSolution() {
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  const board = [];
-  for (let i = 0; i < SIZE; i++) {
-    board[i] = [];
-    for (let j = 0; j < SIZE; j++) {
-      const idx = i * SIZE + j;
-      const val = inputs[idx].value;
-      board[i][j] = val ? parseInt(val, 10) : 0;
-    }
-  }
-  const res = await fetch('/check', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({board})
+function saveScore(name, seconds, difficulty, hints) {
+  const scores = loadScores();
+  scores.push({
+    name, time: seconds, timeLabel: formatTime(seconds),
+    difficulty, hints, date: Date.now(),
   });
-  const data = await res.json();
-  const msg = document.getElementById('message');
-  if (data.error) {
-    msg.style.color = '#d32f2f';
-    msg.innerText = data.error;
+  scores.sort((a, b) => a.time - b.time);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(scores.slice(0, 10)));
+}
+
+function renderLeaderboard() {
+  const tbody = document.querySelector("#leaderboard tbody");
+  tbody.innerHTML = "";
+  loadScores().forEach((entry, index) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${index + 1}</td>
+      <td>${entry.name}</td>
+      <td>${entry.timeLabel}</td>
+      <td>${entry.difficulty}</td>
+      <td>${entry.hints}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function setTheme(dark) {
+  document.body.classList.toggle("dark", dark);
+  localStorage.setItem(THEME_KEY, dark ? "1" : "0");
+  themeToggle.textContent = dark ? "Light Mode" : "Dark Mode";
+}
+
+async function newGame() {
+  const difficulty = difficultyEl.value;
+  const response = await fetch(`${API_URL}?difficulty=${difficulty}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    messageEl.textContent = data.error || "Could not start a new game.";
     return;
   }
-  const incorrect = new Set(data.incorrect.map(x => x[0]*SIZE + x[1]));
-  for (let idx = 0; idx < inputs.length; idx++) {
-    const inp = inputs[idx];
-    if (inp.disabled) continue;
-    inp.className = 'sudoku-cell';
-    if (incorrect.has(idx)) {
-      inp.className = 'sudoku-cell incorrect';
-    }
-  }
-  if (incorrect.size === 0) {
-    msg.style.color = '#388e3c';
-    msg.innerText = 'Congratulations! You solved it!';
-  } else {
-    msg.style.color = '#d32f2f';
-    msg.innerText = 'Some cells are incorrect.';
-  }
+
+  state.puzzle = data.puzzle;
+  state.solution = data.solution;
+  state.difficulty = data.difficulty;
+  state.hints = 0;
+  state.solved = false;
+  state.startTime = Date.now();
+
+  clearInterval(state.timerId);
+  state.timerId = setInterval(updateTimer, 1000);
+
+  messageEl.textContent = "";
+  timerEl.textContent = "Time: 0:00";
+  renderBoard();
 }
 
-// Wire buttons
-window.addEventListener('load', () => {
-  document.getElementById('new-game').addEventListener('click', newGame);
-  document.getElementById('check-solution').addEventListener('click', checkSolution);
-  // initialize
-  newGame();
+document.getElementById("new-game").addEventListener("click", newGame);
+document.getElementById("check").addEventListener("click", checkPuzzle);
+document.getElementById("hint").addEventListener("click", hint);
+difficultyEl.addEventListener("change", newGame);
+themeToggle.addEventListener("click", () => {
+  setTheme(!document.body.classList.contains("dark"));
 });
+
+setTheme(localStorage.getItem(THEME_KEY) === "1");
+renderLeaderboard();
+newGame();
